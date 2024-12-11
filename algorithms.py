@@ -119,9 +119,3 @@ def greedy_mapping(A, B, start_mapping = None, similarity = None):
         print(f"{i=}",end="\r")
 
     return mapping
-
-def invert(mapping):
-
-    inverse = np.zeros(mapping.size,dtype=int)
-    inverse[mapping] = np.arange(mapping.size)
-    return inverse
