@@ -40,7 +40,7 @@ def random_swaps(A, B, mapping, steps,verbose=True):
         if verbose:
             print(f"{i=}",end="\r")
 
-def greedy_mapping(A, B, start_mapping = None, similarity = None):
+def greedy_mapping(A, B, start_mapping = None, similarity = None, c=0.1):
     n = A.shape[0]
 
     if start_mapping is None:
@@ -52,8 +52,6 @@ def greedy_mapping(A, B, start_mapping = None, similarity = None):
         unmapped_source = mapping < 0
         unmapped_target = np.ones(n,dtype=bool)
         unmapped_target[mapping[np.logical_not(unmapped_source)]] = False
-
-    c = 0.1
 
     priority = c*np.log1p(A.sum(axis=1))
     if similarity is None:
