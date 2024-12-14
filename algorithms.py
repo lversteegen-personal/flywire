@@ -117,3 +117,205 @@ def greedy_mapping(A, B, start_mapping = None, similarity = None, c=0.1):
         print(f"{i=}",end="\r")
 
     return mapping
+
+def greedy_max(A, B, start_mapping = None, similarity = None, c=0.1, verbose = True, injective = True):
+    n = A.shape[0]
+
+    if start_mapping is None:
+        mapping = -np.ones(n,dtype=int)
+        unmapped_source = np.ones(n,dtype=bool)
+        unmapped_target = np.ones(n,dtype=bool)
+    else:
+        mapping = start_mapping.copy()
+        unmapped_source = mapping < 0
+        unmapped_target = np.ones(n,dtype=bool)
+        unmapped_target[mapping[np.logical_not(unmapped_source)]] = False
+
+    priority = c*np.log1p(A.sum(axis=1))
+
+    if similarity is None:
+        if start_mapping is None:
+            similarity = np.minimum(A.sum(axis=1).reshape(-1,1),B.sum(axis=1).reshape(1,-1))
+            similarity += np.minimum(A.sum(axis=0).reshape(-1,1),B.sum(axis=0).reshape(1,-1))
+            similarity = np.log1p(similarity)
+        else:
+            similarity = np.zeros((n,n),dtype=np.int64)
+            for u in np.flatnonzero(np.logical_not(unmapped_source)):
+                v = mapping[u]
+
+                u_out = np.flatnonzero(A[u,:])
+                u_out = u_out[unmapped_source[u_out]]
+                v_out = np.flatnonzero(B[v,:])  
+                v_out = v_out[unmapped_target[v_out]]
+
+                min_out = np.minimum.outer(A[[u],u_out],B[[v],v_out])
+                np.add.at(similarity,(u_out[:,None],v_out[None,:]),min_out)
+
+                u_in = np.flatnonzero(A[:,u])
+                u_in = u_in[unmapped_source[u_in]]
+                v_in = np.flatnonzero(B[:,v])
+                v_in = v_in[unmapped_target[v_in]]
+
+                min_in = np.minimum.outer(A[u_in,[u]],B[v_in,[v]])
+                np.add.at(similarity,(u_in[:,None],v_in[None,:]),min_in)
+
+            priority = similarity.max(axis=1)
+            priority[np.logical_not(unmapped_source)] = -1
+            if injective:
+                similarity[:,np.logical_not(unmapped_target)] = -1
+
+
+    for i in range(np.count_nonzero(unmapped_source)):
+
+        u = priority.argmax()
+        v = similarity[u,:].argmax()
+        
+        u_out = np.flatnonzero(A[u,:])
+        v_out = np.flatnonzero(B[v,:])  
+        if injective:
+            u_out = u_out[unmapped_source[u_out]]
+            v_out = v_out[unmapped_target[v_out]]
+
+        min_out = np.minimum.outer(A[[u],u_out],B[[v],v_out])
+        np.add.at(similarity,(u_out[:,None],v_out[None,:]),min_out)
+
+        u_in = np.flatnonzero(A[:,u])
+        v_in = np.flatnonzero(B[:,v])
+
+        if injective:
+            u_in = u_in[unmapped_source[u_in]]
+            v_in = v_in[unmapped_target[v_in]]
+
+        min_in = np.minimum.outer(A[u_in,[u]],B[v_in,[v]])
+        np.add.at(similarity,(u_in[:,None],v_in[None,:]),min_in)
+
+        unmapped_source[u] = False
+        unmapped_target[v] = False
+        mapping[u]=v
+
+        u_out = u_out[unmapped_source[u_out]]
+        v_out = v_out[unmapped_target[v_out]]
+        u_in = u_in[unmapped_source[u_in]]
+        v_in = v_in[unmapped_target[v_in]]
+        if (len(u_out)>0 and len(v_out)>0):
+            priority[u_out] = np.maximum(priority[u_out],similarity[u_out[:,None],v_out[None,:]].argmax(axis=1))
+        if (len(u_in)>0 and len(v_in)>0):
+            priority[u_in] = np.maximum(priority[u_in],similarity[u_in[:,None],v_in[None,:]].argmax(axis=1))
+        if injective:
+            similarity[:,v] = -1
+            similarity[u,:] = -1
+            
+        priority[u] = -1
+
+        if verbose:
+            print(f"{i=}",end="\r")
+
+    return mapping
+
+def find_best_move(G,H, mapping, u, mask = None):
+
+    m = G.shape[0]
+    u_row = G[u,:]
+    u_rnz = np.flatnonzero(u_row)
+    u_row = u_row[u_rnz]
+    u_col = G[:,u]
+    u_cnz = np.flatnonzero(u_col)
+    u_col = u_col[u_cnz]
+
+    if mask is None:
+        n = H.shape[0]
+        X = H[:,mapping[None,u_rnz]].reshape((n,len(u_rnz)))
+        Y = H[mapping[u_cnz,None],:].reshape((len(u_cnz),n))
+    else:
+        X = H[mask,mapping[None,u_rnz]]
+        n = X.shape[0]
+        X = X.reshape((n,len(u_rnz)))
+        Y = H[mapping[u_cnz,None],mask].reshape((len(u_cnz),n))
+
+    scores = np.minimum(u_row[None,:],X).sum(axis=1) + np.minimum(u_col[:,None],Y).sum(axis=0)
+    scores -= np.minimum(G[u,u],H.diagonal())
+
+    return scores
+
+#The mask says which x in [n] are valid choices for mapping[u]. G and H must have 0-diagonal
+def make_best_swap(G,H, mapping, u, scores_by_vertex, mask = None):
+
+    if mask is None:
+        m = G.shape[0]
+        n = H.shape[0]
+    else:
+        in_image = np.zeros(len(mask),dtype=bool)
+        in_image[mapping] = True
+        H_mask = np.logical_and(in_image,mask)
+        G_mask = mask[mapping]
+        m = np.count_nonzero(G_mask)
+        n = np.count_nonzero(H_mask)
+
+    row = G[u,:]
+    rnz = np.flatnonzero(row)
+    row = row[rnz]
+    col = G[:,u]
+    cnz = np.flatnonzero(col)
+    col = col[cnz]
+
+    if mask is None:
+        X = H[mapping[:,None],mapping[None,rnz]].reshape((n,len(rnz)))
+        Y = H[mapping[cnz,None],mapping[None,:]].reshape((len(cnz),n))
+    else:
+        X = H[H_mask,mapping[None,rnz]].reshape((n,len(rnz)))
+        Y = H[mapping[cnz,None],H_mask].reshape((len(cnz),n))
+
+    u_scores = np.minimum(row[None,:],X).sum(axis=1) + np.minimum(col[:,None],Y).sum(axis=0)
+
+    f_u = mapping[u]
+
+    row = H[f_u,mapping]
+    rnz = np.flatnonzero(row)
+    row = row[rnz]
+    col = H[mapping,f_u]
+    cnz = np.flatnonzero(col)
+    col = col[cnz]
+
+    if mask is None:
+        X = G[:,rnz[None,:]].reshape((m,len(rnz)))
+        Y = G[cnz[:,None],:].reshape((len(cnz),m))
+    else:
+        X = G[G_mask,rnz[None,:]].reshape((m,len(rnz)))
+        Y = G[mapping[cnz,None],G_mask].reshape((len(cnz),m))
+
+    f_u_scores = np.minimum(row[None,:],X).sum(axis=1) + np.minimum(col[:,None],Y).sum(axis=0)
+
+    if mask is None:
+        scores = u_scores + f_u_scores + np.minimum(G[u,:],H[mapping,f_u])+np.minimum(G[:,u],H[f_u,mapping])
+        scores -= scores_by_vertex
+        scores -= scores_by_vertex[u]
+        #The actual change will be 2*scores[w], but this does not change which vertex we will choose for the swap.
+    else:
+        scores = u_scores + f_u_scores + np.minimum(G[u,G_mask],H[mapping[G_mask],f_u])+np.minimum(G[G_mask,u],H[f_u,mapping[G_mask]])
+        scores -= scores_by_vertex[G_mask]
+        scores -= scores_by_vertex[u]
+
+    w = scores.argmax()
+    if scores[w] > 0:
+
+        f_w = mapping[w]
+
+        scores_by_vertex += np.minimum(G[:,u],H[mapping,f_w])+np.minimum(G[u,:],H[f_w,mapping])+np.minimum(G[:,w],H[mapping,f_u])+np.minimum(G[w,:],H[f_u,mapping])
+        scores_by_vertex -= np.minimum(G[:,u],H[mapping,f_u])+np.minimum(G[u,:],H[f_u,mapping])+np.minimum(G[:,w],H[mapping,f_w])+np.minimum(G[w,:],H[f_w,mapping])
+
+        scores_by_vertex[u] = u_scores[w]+ np.minimum(G[u,w],H[f_w,f_u])+np.minimum(G[w,u],H[f_u,f_w])
+        scores_by_vertex[w] = f_u_scores[w]+ np.minimum(G[u,w],H[f_w,f_u])+np.minimum(G[w,u],H[f_u,f_w])
+
+        mapping[u] = f_w
+        mapping[w] = f_u
+
+        return scores[w]
+    
+    else:
+        return 0
+    
+def get_scores_by_vertex(G,H,mapping):
+
+    m = G.shape[0]
+    scores = np.minimum(G,H[mapping[:,None],mapping[None,:]])
+    return scores.sum(axis=0)+scores.sum(axis=1)

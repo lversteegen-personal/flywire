@@ -29,6 +29,23 @@ def get_csr_matrix(edges):
 
     return M
 
+def random_graph(n, max=1, rng = None):
+
+    if rng is None:
+        rng = np.random.default_rng()
+    G = rng.integers(max+1,size=(n,n))
+    G[np.arange(n),np.arange(n)] = 0
+    return G
+
+def shuffle_graph(G,rng=None):
+
+    if rng is None:
+        rng = np.random.default_rng()
+    n = G.shape[0]
+    shuffle = rng.permutation(n)
+    H = G[shuffle[:,None],shuffle[None,:]]
+    return H, invert(shuffle)
+
 def get_best_connected(X, m:int):
     total_degrees = (X!=0).sum(axis=1)+(X!=0).sum(axis = 0)
     index_order = np.argsort(total_degrees)
