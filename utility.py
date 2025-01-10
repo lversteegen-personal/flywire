@@ -1,19 +1,5 @@
-from pandas import read_csv
-import scipy as sp
 import numpy as np
-
-male_edges = {(int(str.removeprefix(r[1], "m")), int(str.removeprefix(r[2], "m"))): int(r[3]) 
-                for r in read_csv("male_connectome_graph.csv").itertuples()}
-female_edges = {(int(str.removeprefix(r[1], "f")), int(str.removeprefix(r[2], "f"))): int(r[3])
-                for r in read_csv("female_connectome_graph.csv").itertuples()}
-matching = {int(str.removeprefix(r[1], "m")): int(str.removeprefix(r[2], "f")) for r in read_csv("benchmark.csv").itertuples()}
-alignment = 0
-
-#for male_nodes, edge_weight in male_edges.items():
-#  female_nodes = (matching[male_nodes[0]], matching[male_nodes[1]])
-#  alignment += min(edge_weight, female_edges.get(female_nodes, 0))
-
-#print(f"{alignment=}")
+import scipy as sp
 
 def get_csr_matrix(edges):
 
@@ -37,13 +23,96 @@ def random_graph(n, max=1, rng = None):
     G[np.arange(n),np.arange(n)] = 0
     return G
 
-def shuffle_graph(G,rng=None):
+def random_graph_dist(n, p=1,sample_source=None,rng=None):
+
+    if sample_source is None:
+        sample_source = lambda:1
+    if rng is None:
+        rng = np.random.default_rng()
+    m = rng.binomial(n**2,p)
+    edges = rng.choice(n**2,size=m,replace=False)
+    G = np.zeros(n**2,dtype=int)
+    
+    for i in range(m):
+        G[edges[i]] = sample_source()
+    
+    G = G.reshape((n,n))    
+
+    G[np.arange(n),np.arange(n)] = 0
+    return G
+
+def get_cycles(permutation):
+
+    cycles = []
+    visited = set()
+
+    for i in range(len(permutation)):
+        if i in visited:
+            continue
+
+        c = []
+        j=i
+        while True:
+            visited.add(j)
+            c.append(j)
+            if permutation[j] == i:
+                break
+            else:
+                j = permutation[j]
+
+        cycles.append(np.array(c))
+
+    return cycles
+
+def shuffle_cycles(permutation,rng=None):
 
     if rng is None:
         rng = np.random.default_rng()
-    n = G.shape[0]
-    shuffle = rng.permutation(n)
+
+    cycles = get_cycles(permutation)
+    new_permutation = permutation.copy()
+
+    for c in cycles:
+        new_permutation[c] = rng.permutation(c)
+
+    return new_permutation
+
+def random_extension(n,partial_mapping_from, partial_mapping_to,rng = None):
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    extension = np.arange(n)
+
+    permute_source = np.delete(extension,partial_mapping_from)
+    permute_target = np.delete(extension,partial_mapping_to)
+    extension[permute_source] = rng.permutation(permute_target)
+    extension[partial_mapping_from] = partial_mapping_to
+
+    return extension
+
+def shuffle_map(map, stable=None,rng = None):
+
+    if rng is None:
+        rng = np.random.default_rng()
+    n = len(map)
+
+    shuffle = map.copy()
+    if stable is not None:
+        permute_source = np.delete(np.arange(n),stable)
+        permute_target = np.delete(np.arange(n),map[stable])
+        shuffle[permute_source] = rng.permutation(permute_target)
+    else:
+        shuffle = rng.permutation(n)
+
+    return shuffle
+
+def shuffle_graph(G,stable=None,rng=None):
+
+    shuffle = shuffle_map(np.arange(G.shape[0]),stable=stable,rng=rng)
+
     H = G[shuffle[:,None],shuffle[None,:]]
+
     return H, invert(shuffle)
 
 def get_best_connected(X, m:int):
@@ -78,12 +147,10 @@ def score(G, H, mapping, require_surjective = True):
     else:
         return np.minimum(G,H[mapping[:,None],mapping[None,:]]).sum()
 
-M = get_csr_matrix(male_edges)
-F = get_csr_matrix(female_edges)
+#Don't forget to invert!
+def save_as_csv(mapping, file_name):
+    """Remember to invert the mapping if necessary!"""
 
-n=M.shape[0]
-
-benchmark_mapping = np.zeros(n,dtype=int)
-for u,v in matching.items():
-    benchmark_mapping[u-1] = v-1
-
+    rows = [("Male Node ID","Female Node ID")]
+    rows.extend(zip(["m"+(i+1) for i in range(len(mapping))],["f"+(j+1) for j in mapping]))
+    np.savetxt(file_name,rows)

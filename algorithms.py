@@ -289,11 +289,13 @@ def make_best_swap(G,H, mapping, u, scores_by_vertex, mask = None):
         scores = u_scores + f_u_scores + np.minimum(G[u,:],H[mapping,f_u])+np.minimum(G[:,u],H[f_u,mapping])
         scores -= scores_by_vertex
         scores -= scores_by_vertex[u]
+        scores += np.minimum(G[u,:],H[f_u,mapping])+np.minimum(G[:,u],H[mapping,f_u])
         #The actual change will be 2*scores[w], but this does not change which vertex we will choose for the swap.
     else:
         scores = u_scores + f_u_scores + np.minimum(G[u,G_mask],H[mapping[G_mask],f_u])+np.minimum(G[G_mask,u],H[f_u,mapping[G_mask]])
         scores -= scores_by_vertex[G_mask]
         scores -= scores_by_vertex[u]
+        scores += np.minimum(G[u,G_mask],H[f_u,mapping[G_mask]])+np.minimum(G[G_mask,u],H[mapping[G_mask],f_u])
 
     w = scores.argmax()
     if scores[w] > 0:
@@ -319,3 +321,123 @@ def get_scores_by_vertex(G,H,mapping):
     m = G.shape[0]
     scores = np.minimum(G,H[mapping[:,None],mapping[None,:]])
     return scores.sum(axis=0)+scores.sum(axis=1)
+    
+def move_or_swap(G,H, mapping, u, scores_by_vertex, usage, penalty_gradient, rng =None):
+
+    m = G.shape[0]
+    n = H.shape[0]
+    f_u = mapping[u]
+
+    row = G[u,:]
+    rnz = np.flatnonzero(row)
+    row = row[rnz]
+    col = G[:,u]
+    cnz = np.flatnonzero(col)
+    col = col[cnz]
+
+    X = H[:,mapping[None,rnz]].reshape((n,len(rnz)))
+    Y = H[mapping[cnz,None],:].reshape((len(cnz),n))
+
+    base_scores = np.minimum(row[None,:],X).sum(axis=1) + np.minimum(col[:,None],Y).sum(axis=0)
+    u_scores = base_scores[mapping]
+
+    move_scores = base_scores - base_scores[f_u]
+    move_scores -= penalty_gradient(usage) 
+    move_scores += penalty_gradient(usage[f_u]-1)
+    move_scores[f_u] = 0
+
+    row = H[f_u,mapping]
+    rnz = np.flatnonzero(row)
+    row = row[rnz]
+    col = H[mapping,f_u]
+    cnz = np.flatnonzero(col)
+    col = col[cnz]
+
+    X = G[:,rnz[None,:]].reshape((m,len(rnz)))
+    Y = G[cnz[:,None],:].reshape((len(cnz),m))
+
+    f_u_scores = np.minimum(row[None,:],X).sum(axis=1) + np.minimum(col[:,None],Y).sum(axis=0)
+
+    swap_scores = u_scores + f_u_scores + np.minimum(G[u,:],H[mapping,f_u])+np.minimum(G[:,u],H[f_u,mapping])
+    swap_scores -= scores_by_vertex
+    swap_scores -= scores_by_vertex[u]
+    swap_scores += np.minimum(G[u,:],H[f_u,mapping])+np.minimum(G[:,u],H[mapping,f_u])
+
+    if rng is None:
+        x = move_scores.argmax()
+        w = swap_scores.argmax()
+    else:
+        max_value = move_scores.max()
+        max_indices=np.flatnonzero(move_scores==max_value)
+        x = rng.choice(max_indices)
+        max_value = swap_scores.max()
+        max_indices=np.flatnonzero(swap_scores==max_value)
+        w = rng.choice(max_indices)
+        
+    if swap_scores[w] > 0 and swap_scores[w] >= move_scores[x]:
+
+        f_w = mapping[w]
+
+        scores_by_vertex += np.minimum(G[:,u],H[mapping,f_w])+np.minimum(G[u,:],H[f_w,mapping])+np.minimum(G[:,w],H[mapping,f_u])+np.minimum(G[w,:],H[f_u,mapping])
+        scores_by_vertex -= np.minimum(G[:,u],H[mapping,f_u])+np.minimum(G[u,:],H[f_u,mapping])+np.minimum(G[:,w],H[mapping,f_w])+np.minimum(G[w,:],H[f_w,mapping])
+
+        scores_by_vertex[u] = u_scores[w]+ np.minimum(G[u,w],H[f_w,f_u])+np.minimum(G[w,u],H[f_u,f_w])
+        scores_by_vertex[w] = f_u_scores[w]+ np.minimum(G[u,w],H[f_w,f_u])+np.minimum(G[w,u],H[f_u,f_w])
+
+        mapping[u] = f_w
+        mapping[w] = f_u
+
+        return swap_scores[w],True
+    elif move_scores[x] > 0:
+
+        scores_by_vertex += np.minimum(G[:,u],H[mapping,x])+np.minimum(G[u,:],H[x,mapping]) - np.minimum(G[:,u],H[mapping,f_u])- np.minimum(G[u,:],H[f_u,mapping])
+        
+        scores_by_vertex[u] = base_scores[x]
+
+        mapping[u] = x
+        usage[f_u] -= 1
+        usage[x] += 1
+
+        return base_scores[x] - base_scores[f_u],True
+    else:
+        return 0,False
+
+def move_swap_optimization(G,H,start_mapping=None,penalty_gradient=lambda x:0,rng=None,max_epochs = 50,verbose=False,randomize_argmax=False):
+
+    N = G.shape[0]
+    k = H.shape[0]
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    if start_mapping is None:
+        mapping = rng.choice(k,size=N)
+    else:
+        mapping = np.copy(start_mapping)
+
+    usage = np.zeros(k,dtype=np.int32)
+    np.add.at(usage,mapping,1)
+    scores_by_vertex = get_scores_by_vertex(G,H,mapping)
+    score_track=scores_by_vertex.sum()//2
+
+    for i in range(max_epochs):
+
+        outer_improvement = False
+        for j,u in enumerate(rng.permutation(N)):
+            
+            if randomize_argmax:
+                change,improvement = move_or_swap(G,H,mapping,u,scores_by_vertex,usage,penalty_gradient=penalty_gradient,rng=rng)
+            else:
+                change,improvement = move_or_swap(G,H,mapping,u,scores_by_vertex,usage,penalty_gradient=penalty_gradient)
+            score_track += change
+            #if score_track != score(G,H,mapping,require_surjective=False) or scores_by_vertex.sum()//2 != score_track:
+            #    raise Exception("Error!")
+            outer_improvement = improvement or outer_improvement
+            
+            if verbose and j%20==0:
+                print(f"{i=}, {j=}, {score_track=}, unique={len(np.unique(mapping))}"+10*" ",end="\r")
+
+        if not outer_improvement:
+            break
+
+    return mapping, score_track
