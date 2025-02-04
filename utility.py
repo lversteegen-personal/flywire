@@ -152,5 +152,5 @@ def save_as_csv(mapping, file_name):
     """Remember to invert the mapping if necessary!"""
 
     rows = [("Male Node ID","Female Node ID")]
-    rows.extend(zip(["m"+(i+1) for i in range(len(mapping))],["f"+(j+1) for j in mapping]))
-    np.savetxt(file_name,rows)
+    rows.extend(zip(["m"+str(i+1) for i in range(len(mapping))],["f"+str(j+1) for j in mapping]))
+    np.savetxt(file_name,rows,fmt="%s",delimiter=",")

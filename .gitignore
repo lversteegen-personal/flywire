@@ -4,4 +4,5 @@ male_connectome_graph.csv
 data.txt
 colab_setup.ipynb
 mappings/*
-__pycache__
+__pycache__/*
+rejected/*
