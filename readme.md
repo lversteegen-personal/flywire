@@ -14,15 +14,13 @@ The challenge team also provided a benchmark map f_0 (courtesy of Alexander Bate
 
 # The Files
 
+challenge.ipynb - The main notebook that contains some analysis of the two graphs and shows how the greedy swaps are made.
+
 data_loader.py - Loads the male and female connectome as scipy sparse matrices M and F respectively. It also loads benchmark_mapping in form of a 1D numpy array.
 
 utility.py - Contains functions that I found useful during experimentation, in particular for generating random graphs for testing new algorithms.
 
 algorithms.py - Here I consolidated algorithms that I wanted to be able to access from different notebooks.
-
-matching.ipynb - A notebook showing various experiments I made in search of a better mapping.
-
-analysis.ipnyb - A notebook analysing some of the properties of the two graphs and the mapping between them.
 
 cupy.ipynb - Since my algorithms were heavily vectorized, I could accelerate them by using a GPU. I think it is more standard to write code that is agnostic to whether it will be using cupy or numpy. However, there do seem to be certain differences in the API of the two frameworks (for example, the rng of cupy offers fewer methods), and because I had to rely on the free GPU minutes of Google Colab (and since iterating versions in my Github-Colab workflow is a pain), I could not afford to spend much time trying to write framework agnostic code. Instead, I set up a separate cupy notebook to use with A GPU in Colab. The functions in its cells are essentially copied from algorithms.py.
 
@@ -34,7 +32,7 @@ The most naive approach is to swap the images f(u) and f(v) for randomly chosen 
 
 ## Greedy swaps
 
-It is not necessary to recalculate the entire score for each swap, which is quite useful because the score calculation O(|E_M|+|E_F|). In fact, one can find the optimal swapping partner for a given vertex u in O(n*(d(u)+d(v))). On average this is O(|E_M|+|E_F|), which essentially means that we can try n swaps for the price of 1. What is more, calculating the optimal swap can be done in a numpy/cupy-friendly vectorized manner. The algorithm for finding an optimal swapping partner is implemented in make_best_swap.
+It is not necessary to recalculate the entire score for each swap, which is quite useful because the score calculation O(|E_M|+|E_F|). In fact, one can find the optimal swapping partner for a given vertex u in O(n*(d(u)+d(v))). On average this is O(|E_M|+|E_F|), which essentially means that we can try n swaps for the price of 1. What is more, calculating the optimal swap can be done in a numpy/cupy-friendly vectorized manner. The algorithm for finding an optimal swapping partner is implemented in make_best_swap. My best mapping was obtained by performing these initial swaps on the benchmark mapping provided on the challenge website although some of the mappings I trained starting from a random permutation were not too far off.
 
 ## Why I think you cannot do much better than pair swaps
 
@@ -53,6 +51,8 @@ Consider the general algorithmic of optimizing score_{G,H}(f)=sum_{u,v} min(E_G(
 For these reasons I thought it was a good idea to try out my more sophisticated ideas on isomorphic random graphs. I.e., we sample a graph G according to some distribution, and then we permute its vertices randomly to obtain H. In this setup, finding the map f:V(G)->V(H) that maximizes score_{G,H}(f) reduces to the well-known [graph isomorphism problem](https://en.wikipedia.org/wiki/Graph_isomorphism_problem), which can be solved in quasi-polynomial time (in fact, with the exception of very pathological pairs (G,H) in linear time). However, we are of course still allowed to optimize score_{G,H} by methods that are valid for non-isomorphic graphs.
 
 The greedy-swap algorithm seems to get stuck in local maxima for Erdős–Rényi–Gilbert random graphs, much more than for the connectome graphs. Greedy-swap tends to get stuck less if the edges of an ERG random graphs are given weights according to some slowly decaying distribution. This seems to confirm the heuristic that score_{G,H} is easier to optimize if G and H have more structure.
+
+I may add a second notebook with my experiments for random graphs in the future.
 
 ## Non-injective mappings
 
